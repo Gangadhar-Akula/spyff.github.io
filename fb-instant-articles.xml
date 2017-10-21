@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title></title>
+    <link>https://spyff.github.io/</link>
+    <description>
+      Fejes Ferenc blog
+    </description>
+    
+        
+            <item>
+                <title>LEDE MPTCP with kernel 4.9</title>
+                <link>https://spyff.github.io//mptcp/2017/10/21/lede-mptcp-kernel-4.9/</link>
+                <content:encoded>
+                    <![CDATA[
+                    <p><img src="/images/mptcp_lede/lede_mptcp_4.9.png" alt="" /></p>
+
+<h1 id="some-small-update">Some small update</h1>
+
+<p>The MPTCP LEDE project previously supported only the stable 17.01 LEDE branch and the latest stable MPTCP kernel branch. Not much after new MPTCP version released or at least started the development of that. So we have the in development <a href="https://github.com/multipath-tcp/mptcp/tree/mptcp_v0.93">branch</a> of MPTCP kernel version 0.93 which is based on the 4.9 vanilla kernel version. Because long term supported kernels also supported by LEDE (4.4 and 4.9 currently) I updated my fork.</p>
+
+<h2 id="what-we-have-now">What we have now</h2>
+
+<p><a href="https://github.com/spyff/lede-mptcp/tree/master">Master branch</a> with unstable MPTCP supported 4.9 kernel</p>
+
+<p><a href="https://github.com/spyff/lede-mptcp/tree/lede-mptcp-17.01">Lede-mptcp-17.01</a> branch with stable MPTCP supported 4.4 kernel</p>
+
+<h2 id="usage">Usage</h2>
+
+<p>Just as before, before the start of building LEDE, its required to run <code class="highlighter-rouge">make kernel_menuconfig</code> then enable MPTCP support in <code class="highlighter-rouge">Networking support -&gt; Networking options</code> section of kernel menuconfig. In the submenus You can select path-manager and scheduler modules to compile.</p>
+
+
+                    ]]>
+                </content:encoded>
+                <guid isPermaLink="false">/mptcp/2017/10/21/lede-mptcp-kernel-4.9/</guid>
+                <description>
+                    
+                    Just added master branch with the actual (currently unstable but working) MPTCP implementation.
+                    
+                </description>
+                <pubDate>Sat, 21 Oct 2017 17:00:00 +0200</pubDate>
+                <author>Fejes Ferenc</author>
+            </item>
+        
+    
+        
+            <item>
+                <title>Multipath Wi-Fi bridging with transparent MPTCP proxy on LEDE</title>
+                <link>https://spyff.github.io//mptcp/2017/08/27/transparent-mptcp-proxy/</link>
+                <content:encoded>
+                    <![CDATA[
+                    <h1 id="brief-intro">Brief intro</h1>
+<ul>
+  <li><strong>LEDE</strong> (Linux Embedded Development Environment) is a fork of OpenWRT the well known Linux distro for routers.</li>
+  <li><strong>MPTCP</strong> (MultiPath Transmission Control Protocol) is defined in RFC 6824. Designed to use multiple network interfaces (Ethernet, Wi-Fi, LTE, etc.) for a communication session.</li>
+  <li><strong>shadowsocks-libev</strong> is a lightweight proxy application. It has TCP redirection functionality (<strong>ss-redir</strong> module) which is used later.</li>
+</ul>
+
+<h2 id="main-problem-and-the-goal-of-the-project">Main problem and the goal of the project</h2>
+<p>In a Wi-Fi mesh network (like Freifunk backbone) there are multiple point-to-point links between the single nodes. I’m not really into it, but secondary links might be used for failover purposes or some load balancing work between the different paths. For better resource allocation, the free capacity on the secondary links should be used if it exists. That’s where MPTCP comes in: we can build MPTCP subflows over them, and because of the smart congestion control algorithm it only uses as many bandwidth on the secondary link as many available. In this project, I will show step-by-step how You can achieve this kind of operation in real life environment. There are few things which are required for the project:</p>
+<ul>
+  <li>2 routers</li>
+  <li>4 Wi-Fi bridge for two point-to-point WAN Wi-Fi links (or 2 UDP cable for testing)</li>
+  <li>LEDE with MPTCP support</li>
+  <li>shadowsocks-libev</li>
+</ul>
+
+<h2 id="operation-example">Operation example</h2>
+<ol>
+  <li>Clients are connecting to the routers. They only supporting regular TCP.</li>
+  <li>When a client starts a TCP session, which  runs through the router, we redirect it on the router to the local port if the <strong>ss-redir</strong> with an iptables rule.</li>
+  <li>The router supports MPTCP and builds multiple subflows over the Wi-Fi WAN paths with the second router.</li>
+  <li>On the second router <strong>ss-server</strong> reintercepts the traffic of the subflows into a recently opened regular TCP flow to the client’s original destination.</li>
+  <li>The endpoints are enjoying the benefits of multiple WAN paths (larger bandwidth, better and faster failover).</li>
+</ol>
+
+<h1 id="guide-for-reproducing-the-project">Guide for reproducing the project</h1>
+<h2 id="1-get-the-required-software-environment-and-build-the-lede-images-for-the-routers">1. Get the required software environment and build the LEDE images for the routers</h2>
+<p>First, we need to download my fork of LEDE which contains the patch for MPTCP support.</p>
+<div class="highlighter-rouge"><pre class="highlight"><code>$ git clone https://github.com/spyff/lede-mptcp.git
+</code></pre>
+</div>
+<p>Before we go ahead, let’s make sure we have the required dependencies for the built environment and install them.</p>
+<div class="highlighter-rouge"><pre class="highlight"><code>$ sudo apt-get install subversion g++ zlib1g-dev build-essential git python rsync man-db
+$ sudo apt-get install libncurses5-dev gawk gettext unzip file libssl-dev wget
+</code></pre>
+</div>
+<p>Then lets prepare the build environment and get the latest package infos and patches.</p>
+<div class="highlighter-rouge"><pre class="highlight"><code>$ cd lede-mptcp
+$ ./scripts/feeds update -a
+$ ./scripts/feeds install -a
+</code></pre>
+</div>
+<p>In the next step, we need to turn on MPTCP support for the build and enable shadowsocks-libev packages for the final LEDE build.
+We can choose between the regular built in shadowsocks-libev components from original LEDE packages or my fork of shadowsocks-libev which is called <strong>shadowsocks-libev-nocrpyto</strong> where the encryption is optional (for turning off, choose <code class="highlighter-rouge">none</code> for cipher).
+<img src="/images/gsoc/proxy_menuconfig.png" alt="" /></p>
+<div class="highlighter-rouge"><pre class="highlight"><code>$ make menuconfig
+</code></pre>
+</div>
+<p>First, select the device (router) where You want to install LEDE as the target. For testing, use <code class="highlighter-rouge">x86</code> and <code class="highlighter-rouge">VirtualBox VDI image</code> as output. Then navigate to <code class="highlighter-rouge">Network &gt; Web Servers/Proxies</code> and select <code class="highlighter-rouge">shadowsocks-libev-nocrypto-ss-local</code> and <code class="highlighter-rouge">shadowsocks-libev-nocrypto-ss-redir</code>. Of course, You can select the regular versions from them without <code class="highlighter-rouge">-nocrypto</code>, but I recommend the nocrypto versions because of the better performance. <strong>Save the configuration!</strong></p>
+
+<p>Next step we have to enable the MPTCP support in the kernel.
+<img src="/images/gsoc/mptcp_menuconfig.png" alt="" /></p>
+<div class="highlighter-rouge"><pre class="highlight"><code>$ make kernel_menuconfig
+</code></pre>
+</div>
+<p>Then navigate into the <code class="highlighter-rouge">Networking support &gt; Networking options</code> and enable <code class="highlighter-rouge">MPTCP protocol</code>. <strong>Save the configuration!</strong></p>
+
+<p>We are ready with the configuration so let’s build the image!</p>
+<div class="highlighter-rouge"><pre class="highlight"><code>$ make
+</code></pre>
+</div>
+<p>After that, You should repeat the steps for another device. The output is a flashable image in every case, somewhere in the <code class="highlighter-rouge">lede-mptcp/bin/targets</code> and selected architecture folder. For flashing the images to the router You should find more information for searching the specific model. In most cases that is a simple firmware upgrade in the web admin GUI.</p>
+
+<h2 id="2-assemble-the-physical-test-environment">2. Assemble the physical test environment</h2>
+
+<p><img src="https://raw.githubusercontent.com/spyff/draw.io/master/GSoC2017_final_topology.jpg" alt="Topology" /></p>
+
+<ul>
+  <li>For the tests, I use the following hardware:
+    <ul>
+      <li>Netgear R7000 router</li>
+      <li>Netgear R7800 router</li>
+      <li>2 Ubiquiti Loco M5 Wi-Fi bridges</li>
+      <li>2 Ubiquiti M5 Wi-Fi bridges</li>
+      <li>Lots of small UTP cables</li>
+      <li>A PC and a Laptop (or in some cases a RaspberryPi and a Laptop for the portable setup)</li>
+    </ul>
+  </li>
+  <li>The schematic figure of my setup on the image above. We need 2 WAN connection and 1 LAN on every router. The most simple way if we are creating 3 VLANs. On these routers, there are 5 RJ-45 switch ports, I decided to put LAN to the original WAN port, WAN1 to port 1-2 and WAN2 to port 3-4.</li>
+  <li>Every Wi-Fi bridge is using DHCP to get the IP address. <strong>Path #1</strong> bridges configured to use <strong>5180 MHz</strong> frequency band, <strong>Path #2</strong> bridges on <strong>5700 MHz</strong>.</li>
+  <li>I put Path #1 bridges to WAN1 (connected to port 1 on each router) and Path #2 bridges to WAN2 (connected to port 3 on each router).</li>
+  <li>Client machines connected to the LAN port (which is the original yellow WAN port) on each router. They don’t need any config and get their IP addresses from the router LAN’s DHCP server.</li>
+  <li>WAN1 and WAN2 on the router which will run the <strong>ss-redir</strong> configured to get IP over DHCP.  The router which runs the <strong>ss-server</strong> is configured with static IP and running a DHCP server.</li>
+  <li>Very simple adressing:
+    <ul>
+      <li>LAN on R7000 router: 192.168.70.0/24</li>
+      <li>LAN on R7800 router: 192.168.78.0/24</li>
+      <li>WAN1 on each router: 10.1.1.0/24</li>
+      <li>WAN2 on each router: 10.2.2.0/24</li>
+    </ul>
+  </li>
+  <li>For the switch and network configuration I attached my examples which might be give some pointers even for different routers. Original and modified <code class="highlighter-rouge">etc/config/network</code> files included for both devices: R7000 <a href="https://gist.github.com/spyff/08ca12bc0fcafa4652665bccb9f92d81">original</a> and <a href="https://gist.github.com/spyff/776da4688469d4f82ebe58e340b2db92">modified</a> file, R7800 <a href="https://gist.github.com/spyff/966ddaca33b1deebd395eedc1b30ddde">original</a> and <a href="https://gist.github.com/spyff/50d8ebdf5795b542de4ec3755a098387">modified</a> file.
+For applying the modified configs You should SSH into the LEDE and type:
+    <div class="highlighter-rouge"><pre class="highlight"><code># cat &gt; /etc/config/network
+</code></pre>
+    </div>
+    <p>And paste the content of the new config. Then press <code class="highlighter-rouge">Ctrl+D</code> to close the file. For updating the old config:</p>
+    <div class="highlighter-rouge"><pre class="highlight"><code># uci commit network
+# uci commit
+</code></pre>
+    </div>
+    <p>Then reboot the router and You should see the new config running. Don’t forget to connect your cable into the new LAN port!</p>
+  </li>
+</ul>
+
+<h2 id="3-apply-the-proxy-configuration">3. Apply the proxy configuration</h2>
+<p><strong>Setup for proxy client:</strong>
+SSH into the proxy-client device with the following command but replace the IP address with your router’s LAN IP (<code class="highlighter-rouge">192.168.70.1</code> on R7000 and <code class="highlighter-rouge">192.168.78.1</code> on R7800 in my case). I used R7800 as the proxy client.</p>
+<div class="highlighter-rouge"><pre class="highlight"><code>$ ssh root@192.168.78.1
+</code></pre>
+</div>
+<p>In the root prompt, check if ss-redir and ss-server are available.</p>
+<div class="highlighter-rouge"><pre class="highlight"><code># ss-redir
+</code></pre>
+</div>
+<p>This command maybe runs, maybe drops an error with invalid config path but in both  cases is good for us. We create a config file for the <strong>ss-redir</strong> somewhere. In my case <code class="highlighter-rouge">/etc/ss_redir.json</code> which contains:</p>
+<div class="highlighter-rouge"><pre class="highlight"><code><span class="p">{</span><span class="w">
+    </span><span class="nt">"server"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"10.1.1.70"</span><span class="p">,</span><span class="w"> </span><span class="s2">"10.2.2.70"</span><span class="p">],</span><span class="w">
+    </span><span class="nt">"server_port"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="mi">8388</span><span class="p">,</span><span class="w">
+    </span><span class="nt">"local_address"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="s2">"0.0.0.0"</span><span class="p">,</span><span class="w">
+    </span><span class="nt">"local_port"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="mi">1080</span><span class="p">,</span><span class="w">
+    </span><span class="nt">"password"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span><span class="w">
+    </span><span class="nt">"timeout"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="mi">300</span><span class="p">,</span><span class="w">
+    </span><span class="nt">"method"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="s2">"none"</span><span class="p">,</span><span class="w">
+    </span><span class="nt">"fast_open"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w">
+</span><span class="err">}</span><span class="w">
+</span></code></pre>
+</div>
+<p>You can choose other ciphers as well instead of <code class="highlighter-rouge">none</code>. Check shadowsocks-libev manual on the web for all the available ciphers. I added both WAN IP address of the other router.
+Then I opened up <code class="highlighter-rouge">/etc/rc.local</code> and added the following line before the <code class="highlighter-rouge">exit 0</code> line, to start ss-redir when the router boots up:</p>
+<div class="highlighter-rouge"><pre class="highlight"><code>ss-redir -c /etc/ss_redir.json
+</code></pre>
+</div>
+<p>For redirecting, all the TCP traffic to ss-redir, add another lines into the <code class="highlighter-rouge">/etc/rc.local</code>. The 4. line is because we don’t want to redirect traffic inside of the LAN.</p>
+<div class="highlighter-rouge"><pre class="highlight"><code>iptables -t nat -N SSREDIR
+iptables -t nat -A PREROUTING -p tcp -j SSREDIR
+iptables -t nat -A SSREDIR -d 127.0.0.0/8 -j RETURN
+iptables -t nat -A SSREDIR -d 192.168.78.0/24 -j RETURN
+iptables -t nat -A SSREDIR -p tcp -j REDIRECT --to-ports 1080
+</code></pre>
+</div>
+<p>The config for this router has done, reboot it.</p>
+
+<p><strong>Setup for proxy server</strong>: SSH into the another router which  acts as a proxy server. In my case:</p>
+<div class="highlighter-rouge"><pre class="highlight"><code>$ ssh root@192.168.70.1
+</code></pre>
+</div>
+<p>Then create a configuration file for the ss-server. For example <code class="highlighter-rouge">/etc/ss_server.json</code>:</p>
+<div class="highlighter-rouge"><pre class="highlight"><code><span class="p">{</span><span class="w">
+    </span><span class="nt">"server"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="s2">"0.0.0.0"</span><span class="p">,</span><span class="w">
+    </span><span class="nt">"server_port"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="mi">8388</span><span class="p">,</span><span class="w">
+    </span><span class="nt">"local_address"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="s2">"0.0.0.0"</span><span class="p">,</span><span class="w">
+    </span><span class="nt">"local_port"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="mi">1080</span><span class="p">,</span><span class="w">
+    </span><span class="nt">"password"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span><span class="w">
+    </span><span class="nt">"timeout"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="mi">300</span><span class="p">,</span><span class="w">
+    </span><span class="nt">"method"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="s2">"none"</span><span class="p">,</span><span class="w">
+    </span><span class="nt">"fast_open"</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w">
+</span><span class="err">}</span><span class="w">
+</span></code></pre>
+</div>
+<p>Add the following line before the <code class="highlighter-rouge">exit 0</code> into the <code class="highlighter-rouge">/etc/rc.local</code> to start ss-server on the router startup:</p>
+<div class="highlighter-rouge"><pre class="highlight"><code>ss-server -c /etc/ss_server.json
+</code></pre>
+</div>
+<p>Thats it, reboot the router.</p>
+
+<h2 id="4-verification-of-the-mptcp-proxy-operation">4. Verification of the MPTCP proxy operation</h2>
+<p>To try out if the testbed works well, just start an <strong>iperf3</strong> measurement between the client machines. For example, in my case between the PC and the notebook:</p>
+<div class="highlighter-rouge"><pre class="highlight"><code>iperf3 -s
+</code></pre>
+</div>
+<p>on the PC which is connected to the R7800 LAN.</p>
+<div class="highlighter-rouge"><pre class="highlight"><code>iperf3 -c 192.168.78.107
+</code></pre>
+</div>
+<p>on the notebook which is connected to the R7000 LAN. The IP address there is my PC’s IP address. If everything works, You should see the sum of the two Wi-Fi bridges throughput. Check the video from my test environment below.</p>
+
+<p><a href="http://www.youtube.com/watch?v=1xQQuT9BGuI" title="Transparent MPTCP proxy"><img src="http://img.youtube.com/vi/1xQQuT9BGuI/0.jpg" alt="IMAGE ALT TEXT" /></a></p>
+
+<h1 id="summary">Summary</h1>
+<p>For more information from the project please check Freifunk blog posts linked below. This page is intended for my <em>Google Summer of Code</em> project summary page. My contributions:</p>
+<ul>
+  <li><a href="https://github.com/spyff/lede-mptcp">LEDE fork with MPTCP support, check the git diff which  contains my modifications.</a></li>
+  <li><a href="https://github.com/spyff/shadowsocks-libev-nocrypto">shadowsocks-libev fork <strong>shadowsocks-libev-nocrpyto</strong> with optional cipher support. Check the git diff for my modifications.</a></li>
+  <li><a href="https://github.com/spyff/packages">LEDE feed for my package(s).</a></li>
+  <li><a href="https://blog.freifunk.net/author/spyff/">Blog posts on Freifunk blog.</a></li>
+  <li>This manual with the configuration steps and examples.</li>
+</ul>
+
+                    ]]>
+                </content:encoded>
+                <guid isPermaLink="false">/mptcp/2017/08/27/transparent-mptcp-proxy/</guid>
+                <description>
+                    
+                    How to setup a transparent, site-to-site MPTCP proxy with LEDE. Detailed tutorial and description of my Google Summer of Code 2017 project.
+                    
+                </description>
+                <pubDate>Sun, 27 Aug 2017 16:00:00 +0200</pubDate>
+                <author>Fejes Ferenc</author>
+            </item>
+        
+    
+  </channel>
+</rss>

@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Fejes Ferenc technical blog</title>
+    <description>Fejes Ferenc blog</description>
+    <link>https://spyff.github.io//</link>
+    <atom:link href="https://spyff.github.io//feed.xml" rel="self" type="application/rss+xml" />
+    
+      <item>
+        <title>LEDE MPTCP with kernel 4.9</title>
+        <description>&lt;p&gt;&lt;img src=&quot;/images/mptcp_lede/lede_mptcp_4.9.png&quot; alt=&quot;&quot; /&gt;&lt;/p&gt;
+
+&lt;h1 id=&quot;some-small-update&quot;&gt;Some small update&lt;/h1&gt;
+
+&lt;p&gt;The MPTCP LEDE project previously supported only the stable 17.01 LEDE branch and the latest stable MPTCP kernel branch. Not much after new MPTCP version released or at least started the development of that. So we have the in development &lt;a href=&quot;https://github.com/multipath-tcp/mptcp/tree/mptcp_v0.93&quot;&gt;branch&lt;/a&gt; of MPTCP kernel version 0.93 which is based on the 4.9 vanilla kernel version. Because long term supported kernels also supported by LEDE (4.4 and 4.9 currently) I updated my fork.&lt;/p&gt;
+
+&lt;h2 id=&quot;what-we-have-now&quot;&gt;What we have now&lt;/h2&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://github.com/spyff/lede-mptcp/tree/master&quot;&gt;Master branch&lt;/a&gt; with unstable MPTCP supported 4.9 kernel&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;https://github.com/spyff/lede-mptcp/tree/lede-mptcp-17.01&quot;&gt;Lede-mptcp-17.01&lt;/a&gt; branch with stable MPTCP supported 4.4 kernel&lt;/p&gt;
+
+&lt;h2 id=&quot;usage&quot;&gt;Usage&lt;/h2&gt;
+
+&lt;p&gt;Just as before, before the start of building LEDE, its required to run &lt;code class=&quot;highlighter-rouge&quot;&gt;make kernel_menuconfig&lt;/code&gt; then enable MPTCP support in &lt;code class=&quot;highlighter-rouge&quot;&gt;Networking support -&amp;gt; Networking options&lt;/code&gt; section of kernel menuconfig. In the submenus You can select path-manager and scheduler modules to compile.&lt;/p&gt;
+
+</description>
+        <pubDate>Sat, 21 Oct 2017 17:00:00 +0200</pubDate>
+        <link>https://spyff.github.io//mptcp/2017/10/21/lede-mptcp-kernel-4.9/</link>
+        <guid isPermaLink="true">https://spyff.github.io//mptcp/2017/10/21/lede-mptcp-kernel-4.9/</guid>
+      </item>
+    
+      <item>
+        <title>Multipath Wi-Fi bridging with transparent MPTCP proxy on LEDE</title>
+        <description>&lt;h1 id=&quot;brief-intro&quot;&gt;Brief intro&lt;/h1&gt;
+&lt;ul&gt;
+  &lt;li&gt;&lt;strong&gt;LEDE&lt;/strong&gt; (Linux Embedded Development Environment) is a fork of OpenWRT the well known Linux distro for routers.&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;MPTCP&lt;/strong&gt; (MultiPath Transmission Control Protocol) is defined in RFC 6824. Designed to use multiple network interfaces (Ethernet, Wi-Fi, LTE, etc.) for a communication session.&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;shadowsocks-libev&lt;/strong&gt; is a lightweight proxy application. It has TCP redirection functionality (&lt;strong&gt;ss-redir&lt;/strong&gt; module) which is used later.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h2 id=&quot;main-problem-and-the-goal-of-the-project&quot;&gt;Main problem and the goal of the project&lt;/h2&gt;
+&lt;p&gt;In a Wi-Fi mesh network (like Freifunk backbone) there are multiple point-to-point links between the single nodes. I’m not really into it, but secondary links might be used for failover purposes or some load balancing work between the different paths. For better resource allocation, the free capacity on the secondary links should be used if it exists. That’s where MPTCP comes in: we can build MPTCP subflows over them, and because of the smart congestion control algorithm it only uses as many bandwidth on the secondary link as many available. In this project, I will show step-by-step how You can achieve this kind of operation in real life environment. There are few things which are required for the project:&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;2 routers&lt;/li&gt;
+  &lt;li&gt;4 Wi-Fi bridge for two point-to-point WAN Wi-Fi links (or 2 UDP cable for testing)&lt;/li&gt;
+  &lt;li&gt;LEDE with MPTCP support&lt;/li&gt;
+  &lt;li&gt;shadowsocks-libev&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h2 id=&quot;operation-example&quot;&gt;Operation example&lt;/h2&gt;
+&lt;ol&gt;
+  &lt;li&gt;Clients are connecting to the routers. They only supporting regular TCP.&lt;/li&gt;
+  &lt;li&gt;When a client starts a TCP session, which  runs through the router, we redirect it on the router to the local port if the &lt;strong&gt;ss-redir&lt;/strong&gt; with an iptables rule.&lt;/li&gt;
+  &lt;li&gt;The router supports MPTCP and builds multiple subflows over the Wi-Fi WAN paths with the second router.&lt;/li&gt;
+  &lt;li&gt;On the second router &lt;strong&gt;ss-server&lt;/strong&gt; reintercepts the traffic of the subflows into a recently opened regular TCP flow to the client’s original destination.&lt;/li&gt;
+  &lt;li&gt;The endpoints are enjoying the benefits of multiple WAN paths (larger bandwidth, better and faster failover).&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;h1 id=&quot;guide-for-reproducing-the-project&quot;&gt;Guide for reproducing the project&lt;/h1&gt;
+&lt;h2 id=&quot;1-get-the-required-software-environment-and-build-the-lede-images-for-the-routers&quot;&gt;1. Get the required software environment and build the LEDE images for the routers&lt;/h2&gt;
+&lt;p&gt;First, we need to download my fork of LEDE which contains the patch for MPTCP support.&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;$ git clone https://github.com/spyff/lede-mptcp.git
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;Before we go ahead, let’s make sure we have the required dependencies for the built environment and install them.&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;$ sudo apt-get install subversion g++ zlib1g-dev build-essential git python rsync man-db
+$ sudo apt-get install libncurses5-dev gawk gettext unzip file libssl-dev wget
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;Then lets prepare the build environment and get the latest package infos and patches.&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;$ cd lede-mptcp
+$ ./scripts/feeds update -a
+$ ./scripts/feeds install -a
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;In the next step, we need to turn on MPTCP support for the build and enable shadowsocks-libev packages for the final LEDE build.
+We can choose between the regular built in shadowsocks-libev components from original LEDE packages or my fork of shadowsocks-libev which is called &lt;strong&gt;shadowsocks-libev-nocrpyto&lt;/strong&gt; where the encryption is optional (for turning off, choose &lt;code class=&quot;highlighter-rouge&quot;&gt;none&lt;/code&gt; for cipher).
+&lt;img src=&quot;/images/gsoc/proxy_menuconfig.png&quot; alt=&quot;&quot; /&gt;&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;$ make menuconfig
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;First, select the device (router) where You want to install LEDE as the target. For testing, use &lt;code class=&quot;highlighter-rouge&quot;&gt;x86&lt;/code&gt; and &lt;code class=&quot;highlighter-rouge&quot;&gt;VirtualBox VDI image&lt;/code&gt; as output. Then navigate to &lt;code class=&quot;highlighter-rouge&quot;&gt;Network &amp;gt; Web Servers/Proxies&lt;/code&gt; and select &lt;code class=&quot;highlighter-rouge&quot;&gt;shadowsocks-libev-nocrypto-ss-local&lt;/code&gt; and &lt;code class=&quot;highlighter-rouge&quot;&gt;shadowsocks-libev-nocrypto-ss-redir&lt;/code&gt;. Of course, You can select the regular versions from them without &lt;code class=&quot;highlighter-rouge&quot;&gt;-nocrypto&lt;/code&gt;, but I recommend the nocrypto versions because of the better performance. &lt;strong&gt;Save the configuration!&lt;/strong&gt;&lt;/p&gt;
+
+&lt;p&gt;Next step we have to enable the MPTCP support in the kernel.
+&lt;img src=&quot;/images/gsoc/mptcp_menuconfig.png&quot; alt=&quot;&quot; /&gt;&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;$ make kernel_menuconfig
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;Then navigate into the &lt;code class=&quot;highlighter-rouge&quot;&gt;Networking support &amp;gt; Networking options&lt;/code&gt; and enable &lt;code class=&quot;highlighter-rouge&quot;&gt;MPTCP protocol&lt;/code&gt;. &lt;strong&gt;Save the configuration!&lt;/strong&gt;&lt;/p&gt;
+
+&lt;p&gt;We are ready with the configuration so let’s build the image!&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;$ make
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;After that, You should repeat the steps for another device. The output is a flashable image in every case, somewhere in the &lt;code class=&quot;highlighter-rouge&quot;&gt;lede-mptcp/bin/targets&lt;/code&gt; and selected architecture folder. For flashing the images to the router You should find more information for searching the specific model. In most cases that is a simple firmware upgrade in the web admin GUI.&lt;/p&gt;
+
+&lt;h2 id=&quot;2-assemble-the-physical-test-environment&quot;&gt;2. Assemble the physical test environment&lt;/h2&gt;
+
+&lt;p&gt;&lt;img src=&quot;https://raw.githubusercontent.com/spyff/draw.io/master/GSoC2017_final_topology.jpg&quot; alt=&quot;Topology&quot; /&gt;&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;For the tests, I use the following hardware:
+    &lt;ul&gt;
+      &lt;li&gt;Netgear R7000 router&lt;/li&gt;
+      &lt;li&gt;Netgear R7800 router&lt;/li&gt;
+      &lt;li&gt;2 Ubiquiti Loco M5 Wi-Fi bridges&lt;/li&gt;
+      &lt;li&gt;2 Ubiquiti M5 Wi-Fi bridges&lt;/li&gt;
+      &lt;li&gt;Lots of small UTP cables&lt;/li&gt;
+      &lt;li&gt;A PC and a Laptop (or in some cases a RaspberryPi and a Laptop for the portable setup)&lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/li&gt;
+  &lt;li&gt;The schematic figure of my setup on the image above. We need 2 WAN connection and 1 LAN on every router. The most simple way if we are creating 3 VLANs. On these routers, there are 5 RJ-45 switch ports, I decided to put LAN to the original WAN port, WAN1 to port 1-2 and WAN2 to port 3-4.&lt;/li&gt;
+  &lt;li&gt;Every Wi-Fi bridge is using DHCP to get the IP address. &lt;strong&gt;Path #1&lt;/strong&gt; bridges configured to use &lt;strong&gt;5180 MHz&lt;/strong&gt; frequency band, &lt;strong&gt;Path #2&lt;/strong&gt; bridges on &lt;strong&gt;5700 MHz&lt;/strong&gt;.&lt;/li&gt;
+  &lt;li&gt;I put Path #1 bridges to WAN1 (connected to port 1 on each router) and Path #2 bridges to WAN2 (connected to port 3 on each router).&lt;/li&gt;
+  &lt;li&gt;Client machines connected to the LAN port (which is the original yellow WAN port) on each router. They don’t need any config and get their IP addresses from the router LAN’s DHCP server.&lt;/li&gt;
+  &lt;li&gt;WAN1 and WAN2 on the router which will run the &lt;strong&gt;ss-redir&lt;/strong&gt; configured to get IP over DHCP.  The router which runs the &lt;strong&gt;ss-server&lt;/strong&gt; is configured with static IP and running a DHCP server.&lt;/li&gt;
+  &lt;li&gt;Very simple adressing:
+    &lt;ul&gt;
+      &lt;li&gt;LAN on R7000 router: 192.168.70.0/24&lt;/li&gt;
+      &lt;li&gt;LAN on R7800 router: 192.168.78.0/24&lt;/li&gt;
+      &lt;li&gt;WAN1 on each router: 10.1.1.0/24&lt;/li&gt;
+      &lt;li&gt;WAN2 on each router: 10.2.2.0/24&lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/li&gt;
+  &lt;li&gt;For the switch and network configuration I attached my examples which might be give some pointers even for different routers. Original and modified &lt;code class=&quot;highlighter-rouge&quot;&gt;etc/config/network&lt;/code&gt; files included for both devices: R7000 &lt;a href=&quot;https://gist.github.com/spyff/08ca12bc0fcafa4652665bccb9f92d81&quot;&gt;original&lt;/a&gt; and &lt;a href=&quot;https://gist.github.com/spyff/776da4688469d4f82ebe58e340b2db92&quot;&gt;modified&lt;/a&gt; file, R7800 &lt;a href=&quot;https://gist.github.com/spyff/966ddaca33b1deebd395eedc1b30ddde&quot;&gt;original&lt;/a&gt; and &lt;a href=&quot;https://gist.github.com/spyff/50d8ebdf5795b542de4ec3755a098387&quot;&gt;modified&lt;/a&gt; file.
+For applying the modified configs You should SSH into the LEDE and type:
+    &lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;# cat &amp;gt; /etc/config/network
+&lt;/code&gt;&lt;/pre&gt;
+    &lt;/div&gt;
+    &lt;p&gt;And paste the content of the new config. Then press &lt;code class=&quot;highlighter-rouge&quot;&gt;Ctrl+D&lt;/code&gt; to close the file. For updating the old config:&lt;/p&gt;
+    &lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;# uci commit network
+# uci commit
+&lt;/code&gt;&lt;/pre&gt;
+    &lt;/div&gt;
+    &lt;p&gt;Then reboot the router and You should see the new config running. Don’t forget to connect your cable into the new LAN port!&lt;/p&gt;
+  &lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h2 id=&quot;3-apply-the-proxy-configuration&quot;&gt;3. Apply the proxy configuration&lt;/h2&gt;
+&lt;p&gt;&lt;strong&gt;Setup for proxy client:&lt;/strong&gt;
+SSH into the proxy-client device with the following command but replace the IP address with your router’s LAN IP (&lt;code class=&quot;highlighter-rouge&quot;&gt;192.168.70.1&lt;/code&gt; on R7000 and &lt;code class=&quot;highlighter-rouge&quot;&gt;192.168.78.1&lt;/code&gt; on R7800 in my case). I used R7800 as the proxy client.&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;$ ssh root@192.168.78.1
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;In the root prompt, check if ss-redir and ss-server are available.&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;# ss-redir
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;This command maybe runs, maybe drops an error with invalid config path but in both  cases is good for us. We create a config file for the &lt;strong&gt;ss-redir&lt;/strong&gt; somewhere. In my case &lt;code class=&quot;highlighter-rouge&quot;&gt;/etc/ss_redir.json&lt;/code&gt; which contains:&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;server&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;10.1.1.70&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;10.2.2.70&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;],&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;server_port&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;8388&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;local_address&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;0.0.0.0&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;local_port&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1080&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;password&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;timeout&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;300&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;method&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;none&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;fast_open&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;kc&quot;&gt;false&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+&lt;/span&gt;&lt;span class=&quot;err&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;You can choose other ciphers as well instead of &lt;code class=&quot;highlighter-rouge&quot;&gt;none&lt;/code&gt;. Check shadowsocks-libev manual on the web for all the available ciphers. I added both WAN IP address of the other router.
+Then I opened up &lt;code class=&quot;highlighter-rouge&quot;&gt;/etc/rc.local&lt;/code&gt; and added the following line before the &lt;code class=&quot;highlighter-rouge&quot;&gt;exit 0&lt;/code&gt; line, to start ss-redir when the router boots up:&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;ss-redir -c /etc/ss_redir.json
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;For redirecting, all the TCP traffic to ss-redir, add another lines into the &lt;code class=&quot;highlighter-rouge&quot;&gt;/etc/rc.local&lt;/code&gt;. The 4. line is because we don’t want to redirect traffic inside of the LAN.&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;iptables -t nat -N SSREDIR
+iptables -t nat -A PREROUTING -p tcp -j SSREDIR
+iptables -t nat -A SSREDIR -d 127.0.0.0/8 -j RETURN
+iptables -t nat -A SSREDIR -d 192.168.78.0/24 -j RETURN
+iptables -t nat -A SSREDIR -p tcp -j REDIRECT --to-ports 1080
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;The config for this router has done, reboot it.&lt;/p&gt;
+
+&lt;p&gt;&lt;strong&gt;Setup for proxy server&lt;/strong&gt;: SSH into the another router which  acts as a proxy server. In my case:&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;$ ssh root@192.168.70.1
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;Then create a configuration file for the ss-server. For example &lt;code class=&quot;highlighter-rouge&quot;&gt;/etc/ss_server.json&lt;/code&gt;:&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;server&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;0.0.0.0&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;server_port&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;8388&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;local_address&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;0.0.0.0&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;local_port&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;1080&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;password&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;timeout&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;300&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;method&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;none&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nt&quot;&gt;&quot;fast_open&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;kc&quot;&gt;false&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+&lt;/span&gt;&lt;span class=&quot;err&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;Add the following line before the &lt;code class=&quot;highlighter-rouge&quot;&gt;exit 0&lt;/code&gt; into the &lt;code class=&quot;highlighter-rouge&quot;&gt;/etc/rc.local&lt;/code&gt; to start ss-server on the router startup:&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;ss-server -c /etc/ss_server.json
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;Thats it, reboot the router.&lt;/p&gt;
+
+&lt;h2 id=&quot;4-verification-of-the-mptcp-proxy-operation&quot;&gt;4. Verification of the MPTCP proxy operation&lt;/h2&gt;
+&lt;p&gt;To try out if the testbed works well, just start an &lt;strong&gt;iperf3&lt;/strong&gt; measurement between the client machines. For example, in my case between the PC and the notebook:&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;iperf3 -s
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;on the PC which is connected to the R7800 LAN.&lt;/p&gt;
+&lt;div class=&quot;highlighter-rouge&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;iperf3 -c 192.168.78.107
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;on the notebook which is connected to the R7000 LAN. The IP address there is my PC’s IP address. If everything works, You should see the sum of the two Wi-Fi bridges throughput. Check the video from my test environment below.&lt;/p&gt;
+
+&lt;p&gt;&lt;a href=&quot;http://www.youtube.com/watch?v=1xQQuT9BGuI&quot; title=&quot;Transparent MPTCP proxy&quot;&gt;&lt;img src=&quot;http://img.youtube.com/vi/1xQQuT9BGuI/0.jpg&quot; alt=&quot;IMAGE ALT TEXT&quot; /&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;h1 id=&quot;summary&quot;&gt;Summary&lt;/h1&gt;
+&lt;p&gt;For more information from the project please check Freifunk blog posts linked below. This page is intended for my &lt;em&gt;Google Summer of Code&lt;/em&gt; project summary page. My contributions:&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;&lt;a href=&quot;https://github.com/spyff/lede-mptcp&quot;&gt;LEDE fork with MPTCP support, check the git diff which  contains my modifications.&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://github.com/spyff/shadowsocks-libev-nocrypto&quot;&gt;shadowsocks-libev fork &lt;strong&gt;shadowsocks-libev-nocrpyto&lt;/strong&gt; with optional cipher support. Check the git diff for my modifications.&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://github.com/spyff/packages&quot;&gt;LEDE feed for my package(s).&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://blog.freifunk.net/author/spyff/&quot;&gt;Blog posts on Freifunk blog.&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;This manual with the configuration steps and examples.&lt;/li&gt;
+&lt;/ul&gt;
+</description>
+        <pubDate>Sun, 27 Aug 2017 16:00:00 +0200</pubDate>
+        <link>https://spyff.github.io//mptcp/2017/08/27/transparent-mptcp-proxy/</link>
+        <guid isPermaLink="true">https://spyff.github.io//mptcp/2017/08/27/transparent-mptcp-proxy/</guid>
+      </item>
+    
+  </channel>
+</rss>
